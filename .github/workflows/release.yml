@@ -46,9 +46,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Native MyGo cross-compiles; Intel hosts avoid the Apple Silicon runner queue.
-          - {os: macos-15-intel, platform: darwin/arm64}
-          - {os: macos-15-intel, platform: darwin/amd64}
+          - {os: macos-latest, platform: darwin/arm64}
+          - {os: macos-latest, platform: darwin/amd64}
           - {os: ubuntu-latest, platform: windows/amd64}
           - {os: ubuntu-latest, platform: windows/arm64}
           - {os: ubuntu-latest, platform: linux/amd64}
