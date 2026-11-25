@@ -20,6 +20,8 @@ func main() {
 		a := newApp(filepath.Join(base, "MyNotebook", "workspace.json"))
 		a.win = mygo.NewWindow(mygo.WindowOptions{Title: "MyNotebook", Width: 1180, Height: 780, MinWidth: 760, MinHeight: 500, Content: ui.View(a.view)})
 		a.installMenu()
+		a.startUpdateChecks()
+		mygo.App.OnQuit(a.stopUpdates)
 		a.win.OnClose(func(e *mygo.CloseEvent) {
 			if a.hasChanges() {
 				e.PreventDefault()

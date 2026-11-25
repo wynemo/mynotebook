@@ -3,3 +3,6 @@ dist/
 build/
 .mygo/
 .DS_Store
+mygo-update.key
+artifacts/
+__pycache__/

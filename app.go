@@ -34,6 +34,11 @@ func (n *note) name() string {
 }
 
 type app struct {
+	preferences                notebook.Preferences
+	preferencesLoaded          bool
+	settingsOpen               bool
+	update                     updateState
+	stopUpdateChecks           context.CancelFunc
 	win                        *mygo.Window
 	config                     string
 	roots                      []*notebook.Node
@@ -59,6 +64,7 @@ type app struct {
 
 func newApp(config string) *app {
 	a := &app{config: config, sidebar: true, sidebarWidth: 270, splitPercent: 50, status: "随时写下新的想法"}
+	a.loadPreferences()
 	s, e := notebook.LoadSession(config)
 	if e != nil {
 		a.fail(e)
@@ -155,13 +161,17 @@ func (a *app) chooseFile() {
 	}()
 }
 func (a *app) newNote() {
+	a.ensurePreferences()
+	a.settingsOpen = false
 	a.nextID++
 	n := &note{id: a.nextID, md: &markdown.Options{}, jump: true}
 	a.notes = append(a.notes, n)
 	a.active = n.id
-	a.mode = 0
+	a.mode = a.preferences.DefaultMode
 }
 func (a *app) openFile(path string) {
+	a.ensurePreferences()
+	a.settingsOpen = false
 	p, e := notebook.Canonical(path)
 	if e != nil {
 		a.fail(e)
@@ -183,6 +193,7 @@ func (a *app) openFile(path string) {
 	a.configurePreview(n)
 	a.notes = append(a.notes, n)
 	a.active = n.id
+	a.mode = a.preferences.DefaultMode
 	a.persist()
 }
 func (a *app) configurePreview(n *note) {

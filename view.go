@@ -14,7 +14,13 @@ import (
 )
 
 func (a *app) view(c *ui.Context) {
+	a.ensurePreferences()
 	p := paper(c)
+	if a.preferences.Theme == "light" {
+		p = lightPaper
+	} else if a.preferences.Theme == "dark" {
+		p = darkPaper
+	}
 	c.SetTheme(p.theme)
 	mod := ui.Ctrl
 	if runtime.GOOS == "darwin" {
@@ -34,7 +40,9 @@ func (a *app) view(c *ui.Context) {
 	}
 	ui.Column(c).Fill().Background(p.canvas).Children(func() {
 		a.topbar(c)
-		if a.sidebar {
+		if a.settingsOpen {
+			a.settingsView(c)
+		} else if a.sidebar {
 			ui.Split(c, &a.sidebarWidth, func() { a.sidebarView(c) }, func() { a.documentView(c) }).Grow(1).FillWidth().SplitReset(270).OnChange(a.persist)
 		} else {
 			a.documentView(c)
@@ -82,6 +90,7 @@ func (a *app) topbar(c *ui.Context) {
 			eyebrow(c, "A LITTLE SPACE FOR YOUR MIND")
 		})
 		ui.Box(c).Grow(1)
+		iconButton(c, "设置", icons.settings).OnClick(func() { a.settingsOpen = !a.settingsOpen })
 		iconButton(c, "侧栏", icons.sidebar).OnClick(func() { a.sidebar = !a.sidebar })
 		iconButton(c, "全局搜索", icons.search).OnClick(a.openSearch)
 		ui.Box(c).Size(1, 22).Background(p.line)
@@ -363,7 +372,10 @@ func (a *app) reload(n *note) {
 }
 func (a *app) editorView(c *ui.Context, n *note) {
 	p := paper(c)
-	in := ui.TextAreaBase(c.Key(fmt.Sprintf("editor-%d", n.id)), &n.text).Label("Markdown 编辑器").Placeholder("从一句话开始…").Fill().Padding(26).Font("monospace").FontSize(14).LineHeight(1.7).TextColor(p.ink).OnPaste(func(text string) bool { return a.paste(n, text) })
+	in := ui.TextAreaBase(c.Key(fmt.Sprintf("editor-%d", n.id)), &n.text).Label("Markdown 编辑器").Placeholder("从一句话开始…").Fill().Padding(26).Font("monospace").FontSize(a.preferences.FontSize).LineHeight(1.7).TextColor(p.ink).OnPaste(func(text string) bool { return a.paste(n, text) })
+	if !a.preferences.Wrap {
+		in.NoWrap()
+	}
 	if n.insert != "" {
 		start, end := in.TextSelection()
 		in.ReplaceText(start, end, n.insert)
@@ -467,6 +479,9 @@ func (a *app) installMenu() {
 		}},
 		{Role: mygo.RoleEditMenu},
 		{Label: "视图", Submenu: []*mygo.MenuItem{
+			{Label: "设置…", Accelerator: "CmdOrCtrl+,", Click: action(func() { a.settingsOpen = !a.settingsOpen })},
+			{Label: "检查更新…", Click: action(func() { a.settingsOpen = true; a.checkUpdates(false) })},
+			mygo.Separator(),
 			{Label: "显示 / 隐藏侧栏", Accelerator: "CmdOrCtrl+B", Click: action(func() { a.sidebar = !a.sidebar })},
 			{Label: "全局搜索", Accelerator: "CmdOrCtrl+Shift+F", Click: action(func() { a.sidebar = true; a.searchOpen = true; a.searchFocus.Focus() })},
 			{Label: "编辑 / 预览", Accelerator: "CmdOrCtrl+E", Click: action(func() { a.mode = (a.mode + 1) % 3 })},

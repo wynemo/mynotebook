@@ -1,1 +1,17 @@
-{"name":"MyNotebook","slug":"mynotebook","identifier":"dev.mynotebook.app","version":"0.1.0","out":"build"}
+{
+  "name": "MyNotebook",
+  "slug": "mynotebook",
+  "identifier": "dev.mynotebook.app",
+  "version": "0.1.0",
+  "out": "build",
+  "updates": {
+    "github": "wynemo/mynotebook",
+    "publicKey": "sVmIQpABvuhNon9sjNUW9bRQQxM3HFw9/BLEZtyGPp0="
+  },
+  "linux": {
+    "formats": [
+      "deb",
+      "rpm"
+    ]
+  }
+}

@@ -52,22 +52,23 @@ func lineIcon(paths string) *ui.SVG {
 	return ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">` + paths + `</svg>`))
 }
 
-var icons = struct{ book, folder, file, plus, search, sidebar, save, refresh, close, chevron, edit, eye, split, arrow, more *ui.SVG }{
-	book:    lineIcon(`<path d="M4 4h13a3 3 0 0 1 3 3v14H7a3 3 0 0 1-3-3V4Z"/><path d="M8 4v17M12 9h5M12 13h4"/>`),
-	folder:  lineIcon(`<path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z"/>`),
-	file:    lineIcon(`<path d="M14 3H5v18h14V8l-5-5Z"/><path d="M14 3v5h5M8 13h8M8 17h5"/>`),
-	plus:    lineIcon(`<path d="M12 5v14M5 12h14"/>`),
-	search:  lineIcon(`<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>`),
-	sidebar: lineIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>`),
-	save:    lineIcon(`<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/>`),
-	refresh: lineIcon(`<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/>`),
-	close:   lineIcon(`<path d="m7 7 10 10M17 7 7 17"/>`),
-	chevron: lineIcon(`<path d="m9 5 7 7-7 7"/>`),
-	edit:    lineIcon(`<path d="m15 4 5 5M4 20l5-1L21 7l-5-5L4 14v6Z"/>`),
-	eye:     lineIcon(`<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>`),
-	split:   lineIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>`),
-	arrow:   lineIcon(`<path d="M4 12h16m-6-6 6 6-6 6"/>`),
-	more:    lineIcon(`<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>`),
+var icons = struct{ book, folder, file, plus, search, sidebar, save, refresh, close, chevron, edit, eye, split, arrow, more, settings *ui.SVG }{
+	book:     lineIcon(`<path d="M4 4h13a3 3 0 0 1 3 3v14H7a3 3 0 0 1-3-3V4Z"/><path d="M8 4v17M12 9h5M12 13h4"/>`),
+	folder:   lineIcon(`<path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z"/>`),
+	file:     lineIcon(`<path d="M14 3H5v18h14V8l-5-5Z"/><path d="M14 3v5h5M8 13h8M8 17h5"/>`),
+	plus:     lineIcon(`<path d="M12 5v14M5 12h14"/>`),
+	search:   lineIcon(`<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>`),
+	sidebar:  lineIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>`),
+	save:     lineIcon(`<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/>`),
+	refresh:  lineIcon(`<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/>`),
+	close:    lineIcon(`<path d="m7 7 10 10M17 7 7 17"/>`),
+	chevron:  lineIcon(`<path d="m9 5 7 7-7 7"/>`),
+	edit:     lineIcon(`<path d="m15 4 5 5M4 20l5-1L21 7l-5-5L4 14v6Z"/>`),
+	eye:      lineIcon(`<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>`),
+	split:    lineIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>`),
+	arrow:    lineIcon(`<path d="M4 12h16m-6-6 6 6-6 6"/>`),
+	more:     lineIcon(`<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>`),
+	settings: lineIcon(`<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>`),
 }
 
 func paperButton(c *ui.Context, label string, icon *ui.SVG, primary bool) ui.Element {
