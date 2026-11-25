@@ -14,6 +14,8 @@ import (
 )
 
 func (a *app) view(c *ui.Context) {
+	p := paper(c)
+	c.SetTheme(p.theme)
 	mod := ui.Ctrl
 	if runtime.GOOS == "darwin" {
 		mod = ui.Cmd
@@ -28,36 +30,16 @@ func (a *app) view(c *ui.Context) {
 		a.sidebar = !a.sidebar
 	}
 	if c.Shortcut(mod|ui.Shift, ui.KeyF) {
-		a.sidebar = true
-		a.searchOpen = true
-		a.searchFocus.Focus()
+		a.openSearch()
 	}
-	t := c.Theme()
-	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		ui.Row(c).Height(56).Padding(10, 16).Gap(8).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-			ui.Button(c, "侧栏").Tooltip("显示 / 隐藏侧栏 · Cmd/Ctrl+B").OnClick(func() { a.sidebar = !a.sidebar })
-			ui.Text(c, "MyNotebook").Bold().FontSize(16)
-			ui.Box(c).Grow(1)
-			ui.Button(c, "打开文件").Disabled(a.busy).OnClick(a.chooseFile)
-			ui.Button(c, "添加文件夹").Disabled(a.busy).OnClick(a.chooseFolders)
-			ui.Button(c, "新建笔记").OnClick(a.newNote)
-			ui.PrimaryButton(c, "保存").Disabled(a.current() == nil || a.busy).OnClick(func() { a.save(a.current(), nil) })
-		})
+	ui.Column(c).Fill().Background(p.canvas).Children(func() {
+		a.topbar(c)
 		if a.sidebar {
 			ui.Split(c, &a.sidebarWidth, func() { a.sidebarView(c) }, func() { a.documentView(c) }).Grow(1).FillWidth().SplitReset(270).OnChange(a.persist)
 		} else {
 			a.documentView(c)
 		}
-		ui.Row(c).Height(28).Padding(4, 16).Gap(12).Background(t.Surface).Children(func() {
-			ui.Text(c, a.status).FontSize(11).TextColor(t.TextMuted).SingleLine().Grow(1)
-			if n := a.current(); n != nil {
-				state := "已保存"
-				if n.dirty() {
-					state = "未保存"
-				}
-				ui.Text(c, fmt.Sprintf("%s · %d 字符 · UTF-8", state, utf8.RuneCountInString(n.text))).FontSize(11).TextColor(t.TextMuted)
-			}
-		})
+		a.statusbar(c)
 	})
 	if a.ask && a.pending != nil {
 		switch ui.AlertDialog(c, &a.ask, "保存更改？", a.pending.name()+" 有未保存的更改。", "取消", "不保存", "保存") {
@@ -85,92 +67,171 @@ func (a *app) view(c *ui.Context) {
 		}
 	}
 }
+func (a *app) openSearch() {
+	a.sidebar = true
+	a.searchOpen = true
+	a.searchFocus.Focus()
+	a.startSearch()
+}
+func (a *app) topbar(c *ui.Context) {
+	p := paper(c)
+	ui.Row(c).Height(76).Padding(18, 24).Gap(14).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(p.line).Children(func() {
+		ui.Box(c).Size(36, 36).Radius(10).Background(p.accent).TextColor(p.accentInk).Center().Children(func() { ui.Icon(c, icons.book).Size(23, 23) })
+		ui.Column(c).Gap(2).Children(func() {
+			ui.Text(c, "MyNotebook").FontSize(19).FontWeight(750).LetterSpacing(-0.5)
+			eyebrow(c, "A LITTLE SPACE FOR YOUR MIND")
+		})
+		ui.Box(c).Grow(1)
+		iconButton(c, "侧栏", icons.sidebar).OnClick(func() { a.sidebar = !a.sidebar })
+		iconButton(c, "全局搜索", icons.search).OnClick(a.openSearch)
+		ui.Box(c).Size(1, 22).Background(p.line)
+		paperButton(c, "打开文件", icons.folder, false).Disabled(a.busy).OnClick(a.chooseFile)
+		paperButton(c, "新建笔记", icons.plus, true).OnClick(a.newNote)
+	})
+}
+func (a *app) statusbar(c *ui.Context) {
+	p := paper(c)
+	ui.Row(c).Height(34).Padding(8, 24).Gap(8).AlignItems(ui.Center).BorderWidth(1, 0, 0, 0).BorderColor(p.line).Children(func() {
+		statusDot(c, p.green)
+		ui.Text(c, "本地笔记").FontSize(11).TextColor(p.muted)
+		ui.Text(c, "/ "+a.status).FontSize(11).TextColor(p.muted).SingleLine().Grow(1)
+		if n := a.current(); n != nil {
+			state := "已保存"
+			if n.dirty() {
+				state = "未保存"
+			}
+			ui.Text(c, fmt.Sprintf("%s    ·    %d 字符    ·    UTF-8", state, utf8.RuneCountInString(n.text))).FontSize(11).TextColor(p.muted)
+		} else {
+			ui.Text(c, fmt.Sprintf("%d 个工作区", len(a.roots))).FontSize(11).TextColor(p.muted)
+		}
+	})
+}
 func (a *app) sidebarView(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Fill().Background(t.Surface).Padding(12).Gap(12).Children(func() {
-		page := 0
+	p := paper(c)
+	ui.Column(c).Fill().Background(p.sidebar).Padding(20, 16).Gap(18).Children(func() {
+		ui.Row(c).Gap(4).Padding(4).Radius(12).Background(p.canvas).Children(func() {
+			a.navItem(c, "文件夹", icons.folder, !a.searchOpen, func() { a.searchOpen = false })
+			a.navItem(c, "搜索", icons.search, a.searchOpen, a.openSearch)
+		})
 		if a.searchOpen {
-			page = 1
-		}
-		if ui.Segmented(c, &page, "文件夹", "搜索").Changed() {
-			a.searchOpen = page == 1
-			if a.searchOpen {
-				a.startSearch()
-			}
-		}
-		if a.searchOpen {
-			search := ui.SearchField(c, &a.query).Label("全局搜索").Placeholder("搜索所有文件夹…").Bind(&a.searchFocus)
-			if search.Changed() {
-				a.startSearch()
-			}
-			ui.Text(c, "搜索已保存的 Markdown 内容").FontSize(11).TextColor(t.TextMuted)
-			if a.searching {
-				ui.Text(c, "正在搜索…").TextColor(t.TextMuted)
-			} else {
-				label := fmt.Sprintf("%d 条匹配", len(a.results.Matches))
-				if a.results.Truncated {
-					label += "（仅显示前 500 条）"
-				}
-				ui.Text(c, label).FontSize(12).TextColor(t.TextMuted)
-			}
-			if a.results.Skipped > 0 {
-				ui.Text(c, fmt.Sprintf("已跳过 %d 个无法读取或过大的文件", a.results.Skipped)).FontSize(11).TextColor(t.TextMuted)
-			}
-			ui.Scroll(c).Grow(1).FillWidth().Gap(6).Children(func() {
-				for i, m := range a.results.Matches {
-					ui.Button(c.Key(i), "").FillWidth().Padding(10).Children(func() {
-						ui.Column(c).Gap(4).Children(func() {
-							ui.Text(c, fmt.Sprintf("%s : %d", filepath.Base(m.Path), m.Line)).Bold().FontSize(12)
-							ui.Text(c, m.Text).FontSize(12).TextColor(t.TextMuted).SingleLine()
-							ui.Text(c, filepath.Dir(m.Path)).FontSize(10).TextColor(t.TextMuted).SingleLine()
-						})
-					}).OnClick(func() { a.jumpTo(m) })
-				}
-				if !a.searching && strings.TrimSpace(a.query) != "" && len(a.results.Matches) == 0 {
-					ui.Text(c, "没有找到匹配内容").TextColor(t.TextMuted)
-				}
-			})
+			a.searchView(c)
 			return
 		}
-		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() { ui.Text(c, "工作区").FontSize(12).Bold().Grow(1); ui.Button(c, "刷新").OnClick(a.refresh) })
-		ui.Scroll(c).Grow(1).FillWidth().Gap(10).Children(func() {
+		ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
+			eyebrow(c, "工作区 / WORKSPACES")
+			ui.Box(c).Grow(1)
+			iconButton(c, "刷新", icons.refresh).OnClick(a.refresh)
+		})
+		ui.Scroll(c).Grow(1).FillWidth().Gap(18).Children(func() {
 			if len(a.roots) == 0 {
-				ui.Text(c, "添加文件夹，开始整理笔记。").TextColor(t.TextMuted)
-				ui.Button(c, "选择文件夹").OnClick(a.chooseFolders)
+				ui.Column(c).Padding(12, 6).Gap(10).Children(func() {
+					ui.Text(c, "让想法各就各位。").FontWeight(650)
+					ui.Text(c, "添加一个文件夹，把散落的 Markdown 笔记放在手边。").FontSize(12).LineHeight(1.6).TextColor(p.muted)
+				})
 			}
 			for _, r := range a.roots {
-				ui.Column(c.Key(r.Path)).Gap(4).Children(func() {
-					ui.Row(c).Gap(4).Children(func() {
-						arrow := "▾ "
-						if !r.Open {
-							arrow = "▸ "
-						}
-						ui.Button(c, arrow+r.Name).Grow(1).Tooltip(r.Path).OnClick(func() { r.Open = !r.Open })
-						ui.Button(c, "×").Label("移除文件夹 " + r.Name).Tooltip("从工作区移除，不删除文件").OnClick(func() {
-							for i, n := range a.roots {
-								if n == r {
-									a.roots = append(a.roots[:i], a.roots[i+1:]...)
-									break
-								}
+				ui.Column(c.Key(r.Path)).Gap(7).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(3).Children(func() {
+						b := ui.ButtonBase(c).Label(r.Name).Grow(1).Justify(ui.Start).Padding(6, 4).Gap(7).Tooltip(r.Path).Children(func() {
+							arrow := ui.Icon(c, icons.chevron).Size(11, 11).TextColor(p.muted)
+							if r.Open {
+								arrow.Rotate(90)
 							}
-							a.persist()
-							if a.searchOpen {
-								a.startSearch()
-							}
+							ui.Icon(c, icons.folder).Size(16, 16).TextColor(p.muted)
+							ui.Text(c, r.Name).FontSize(12).FontWeight(700).SingleLine()
 						})
+						b.OnClick(func() { r.Open = !r.Open })
+						iconButton(c, "移除文件夹 "+r.Name, icons.close).OnClick(func() { a.removeRoot(r) })
 					})
 					if r.Open {
 						ui.Tree(c, func() {
 							for _, n := range r.Children {
 								a.treeNode(c, n)
 							}
-						}).FillWidth()
+						}).FillWidth().FontSize(13)
 					}
 				})
 			}
 		})
-		ui.Button(c, "＋ 添加文件夹").Disabled(a.busy).FillWidth().OnClick(a.chooseFolders)
+		ui.Column(c).Gap(12).Children(func() {
+			paperButton(c, "添加文件夹", icons.plus, false).FillWidth().Disabled(a.busy).OnClick(a.chooseFolders)
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(0, 4).Children(func() {
+				statusDot(c, p.green)
+				ui.Text(c, "文件始终保存在你的电脑上").FontSize(10).TextColor(p.muted)
+			})
+		})
 	})
+}
+func (a *app) removeRoot(r *notebook.Node) {
+	for i, n := range a.roots {
+		if n == r {
+			a.roots = append(a.roots[:i], a.roots[i+1:]...)
+			break
+		}
+	}
+	a.persist()
+	a.startSearch()
+}
+func (a *app) navItem(c *ui.Context, label string, icon *ui.SVG, selected bool, action func()) {
+	p := paper(c)
+	b := ui.ButtonBase(c).Label(label).Grow(1).Height(32).Gap(7).Padding(8, 12).Radius(9).FontSize(12).FontWeight(600).TextColor(p.muted)
+	if selected {
+		b.Background(p.accent).TextColor(p.accentInk)
+	} else if b.Hovered() {
+		b.Background(p.selected).TextColor(p.ink)
+	}
+	b.Children(func() { ui.Icon(c, icon).Size(15, 15); ui.Text(c, label) }).OnClick(action)
+}
+func (a *app) searchView(c *ui.Context) {
+	p := paper(c)
+	search := ui.SearchField(c, &a.query).Label("全局搜索").Placeholder("寻找一个想法…").Bind(&a.searchFocus).Height(38).Radius(10).Background(p.sheet)
+	if search.Changed() {
+		a.startSearch()
+	}
+	label := fmt.Sprintf("%d 条匹配", len(a.results.Matches))
+	if a.searching {
+		label = "正在搜索…"
+	} else if a.results.Truncated {
+		label = "前 500 条匹配"
+	}
+	ui.Row(c).AlignItems(ui.Center).Children(func() {
+		eyebrow(c, "搜索结果")
+		ui.Box(c).Grow(1)
+		ui.Text(c, label).FontSize(11).TextColor(p.muted)
+	})
+	ui.Scroll(c).Grow(1).FillWidth().Gap(8).Children(func() {
+		for i, m := range a.results.Matches {
+			b := ui.ButtonBase(c.Key(i)).Label(fmt.Sprintf("%s : %d", filepath.Base(m.Path), m.Line)).FillWidth().Justify(ui.Start).Padding(12).Radius(10).Background(p.canvas).Border(1, p.line)
+			if b.Hovered() {
+				b.Background(p.selected)
+			}
+			b.Children(func() {
+				ui.Column(c).Gap(7).Children(func() {
+					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+						ui.Icon(c, icons.file).Size(14, 14).TextColor(p.muted)
+						ui.Text(c, filepath.Base(m.Path)).Bold().FontSize(12).SingleLine().Grow(1)
+						ui.Text(c, fmt.Sprintf("L%d", m.Line)).FontSize(10).TextColor(p.muted)
+					})
+					ui.Text(c, m.Text).FontSize(12).LineHeight(1.5).TextColor(p.muted).MaxLines(2)
+				})
+			}).OnClick(func() { a.jumpTo(m) })
+		}
+		if !a.searching && len(a.results.Matches) == 0 {
+			ui.Column(c).Padding(12, 4).Gap(8).Children(func() {
+				if strings.TrimSpace(a.query) == "" {
+					ui.Text(c, "想找什么？").FontSize(18).Bold()
+					ui.Text(c, "输入关键词，搜索所有工作区里的笔记。").TextColor(p.muted).FontSize(12)
+				} else {
+					ui.Text(c, "没有找到匹配内容").TextColor(p.muted)
+				}
+			})
+		}
+	})
+	detail := "搜索已保存的 Markdown 内容"
+	if a.results.Skipped > 0 {
+		detail = fmt.Sprintf("跳过 %d 个无法读取或过大的文件", a.results.Skipped)
+	}
+	ui.Text(c, detail).FontSize(10).TextColor(p.muted)
 }
 func (a *app) treeNode(c *ui.Context, n *notebook.Node) {
 	if n.Dir {
@@ -191,34 +252,30 @@ func (a *app) treeNode(c *ui.Context, n *notebook.Node) {
 	}
 }
 func (a *app) documentView(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Grow(1).FillHeight().Children(func() {
+	p := paper(c)
+	ui.Column(c).Grow(1).FillHeight().Background(p.canvas).Children(func() {
 		if len(a.notes) == 0 {
-			ui.Column(c).Fill().Center().Gap(16).Children(func() {
-				ui.Text(c, "写下此刻的想法").FontSize(28).Bold()
-				ui.Text(c, "纯本地 Markdown 笔记，使用 MyGo Native UI 构建。").TextColor(t.TextMuted)
-				ui.Row(c).Gap(10).Children(func() {
-					ui.PrimaryButton(c, "创建第一篇笔记").OnClick(a.newNote)
-					ui.Button(c, "打开已有笔记").OnClick(a.chooseFile)
-				})
-				ui.Text(c, "Cmd/Ctrl+N 新建    Cmd/Ctrl+S 保存    Cmd/Ctrl+Shift+F 搜索").FontSize(12).TextColor(t.TextMuted)
-			})
+			a.emptyView(c)
 			return
 		}
-		ui.ScrollHorizontal(c).Height(44).FillWidth().Background(t.Surface).Children(func() {
-			ui.Row(c).Gap(4).Padding(5, 8).Children(func() {
+		ui.ScrollHorizontal(c).Height(50).FillWidth().BorderWidth(0, 0, 1, 0).BorderColor(p.line).Children(func() {
+			ui.Row(c).Gap(6).Padding(10, 22).Children(func() {
 				for _, n := range a.notes {
-					ui.Row(c.Key(n.id)).Gap(2).Children(func() {
-						label := n.name()
-						if n.dirty() {
-							label += " •"
-						}
-						b := ui.Button(c, label).Tooltip(n.path)
+					ui.Row(c.Key(n.id)).Gap(1).AlignItems(ui.Center).Radius(8).Children(func() {
+						b := ui.ButtonBase(c).Label(n.name()).Tooltip(n.path).Height(30).Padding(6, 10).Gap(7).Radius(8).TextColor(p.muted)
 						if n.id == a.active {
-							b.Background(t.Background)
+							b.Background(p.selected).TextColor(p.ink)
+						} else if b.Hovered() {
+							b.Background(p.sidebar)
 						}
-						b.OnClick(func() { a.active = n.id; a.persist() })
-						ui.Button(c, "×").Label(fmt.Sprintf("关闭标签 %d", n.id)).OnClick(func() { a.guard(n, func() { a.removeNote(n) }) })
+						b.Children(func() {
+							ui.Icon(c, icons.file).Size(14, 14)
+							ui.Text(c, n.name()).FontSize(12).FontWeight(550)
+							if n.dirty() {
+								statusDot(c, p.accent)
+							}
+						}).OnClick(func() { a.active = n.id; a.persist() })
+						iconButton(c, fmt.Sprintf("关闭标签 %d", n.id), icons.close).Size(22, 26).OnClick(func() { a.guard(n, func() { a.removeNote(n) }) })
 					})
 				}
 			})
@@ -227,43 +284,86 @@ func (a *app) documentView(c *ui.Context) {
 		if n == nil {
 			return
 		}
-		ui.Row(c).Padding(10, 16).Gap(8).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-			path := n.path
-			if path == "" {
-				path = "未保存的笔记 · 保存后可粘贴图片"
-			}
-			ui.Text(c, path).SingleLine().FontSize(12).TextColor(t.TextMuted).Grow(1)
-			ui.Segmented(c, &a.mode, "编辑", "预览", "分屏")
-			ui.Button(c, "另存为").Disabled(a.busy).OnClick(func() { a.saveAs(n, nil) })
-			ui.Button(c, "重新载入").Disabled(n.path == "").OnClick(func() {
-				a.guard(n, func() {
-					d, e := notebook.Read(n.path)
-					if e != nil {
-						a.fail(e)
-						return
-					}
-					n.text = d.Text
-					n.saved = d.Text
-					n.version = d.Version
-					n.id = a.nextID + 1
-					a.nextID = n.id
-					a.active = n.id
-					a.configurePreview(n)
+		ui.Row(c).Padding(22, 28).Gap(16).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).Gap(7).Children(func() {
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, icons.folder).Size(12, 12).TextColor(p.muted)
+					ui.Text(c, a.breadcrumb(n)).SingleLine().FontSize(11).TextColor(p.muted)
 				})
+				title := strings.TrimSuffix(n.name(), filepath.Ext(n.name()))
+				if n.path == "" {
+					title = "未命名笔记"
+				}
+				ui.Text(c, title).FontSize(26).FontWeight(750).LetterSpacing(-0.6).SingleLine()
+			})
+			paperButton(c, "保存", icons.save, false).Disabled(a.busy).OnClick(func() { a.save(n, nil) })
+			iconButton(c, "更多操作", icons.more).Menu(func(m *ui.Menu) {
+				if m.Item("另存为…").Disabled(a.busy).Chosen() {
+					a.saveAs(n, nil)
+				}
+				if m.Item("重新载入").Disabled(n.path == "").Chosen() {
+					a.reload(n)
+				}
 			})
 		})
-		switch a.mode {
-		case 0:
-			a.editorView(c, n)
-		case 1:
-			a.previewView(c, n)
-		default:
-			ui.SplitPercent(c, &a.splitPercent, func() { a.editorView(c, n) }, func() { a.previewView(c, n) }).Grow(1).FillWidth()
+		ui.Column(c).Grow(1).FillWidth().Padding(0, 28, 22, 28).Children(func() {
+			ui.Column(c).Fill().Radius(12).Border(1, p.line).Background(p.sheet).Children(func() {
+				ui.Row(c).Height(48).Padding(9, 16).Gap(8).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(p.line).Children(func() {
+					eyebrow(c, "MARKDOWN")
+					ui.Box(c).Grow(1)
+					for i, label := range []string{"编辑", "预览", "分屏"} {
+						icon := []*ui.SVG{icons.edit, icons.eye, icons.split}[i]
+						b := ui.ButtonBase(c).Label(label).Height(28).Padding(6, 10).Gap(5).Radius(7).TextColor(p.muted)
+						if a.mode == i {
+							b.Background(p.selected).TextColor(p.ink)
+						} else if b.Hovered() {
+							b.Background(p.sidebar)
+						}
+						b.Children(func() { ui.Icon(c, icon).Size(13, 13); ui.Text(c, label).FontSize(11).FontWeight(600) }).OnClick(func() { a.mode = i })
+					}
+				})
+				switch a.mode {
+				case 0:
+					a.editorView(c, n)
+				case 1:
+					a.previewView(c, n)
+				default:
+					ui.SplitPercent(c, &a.splitPercent, func() { a.editorView(c, n) }, func() { a.previewView(c, n) }).Grow(1).FillWidth()
+				}
+			})
+		})
+	})
+}
+func (a *app) breadcrumb(n *note) string {
+	if n.path == "" {
+		return "草稿 / 保存后可粘贴图片"
+	}
+	for _, r := range a.roots {
+		if rel, e := filepath.Rel(r.Path, n.path); e == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return r.Name + " / " + filepath.ToSlash(rel)
 		}
+	}
+	return filepath.Base(filepath.Dir(n.path)) + " / " + n.name()
+}
+func (a *app) reload(n *note) {
+	a.guard(n, func() {
+		d, e := notebook.Read(n.path)
+		if e != nil {
+			a.fail(e)
+			return
+		}
+		n.text = d.Text
+		n.saved = d.Text
+		n.version = d.Version
+		a.nextID++
+		n.id = a.nextID
+		a.active = n.id
+		a.configurePreview(n)
 	})
 }
 func (a *app) editorView(c *ui.Context, n *note) {
-	in := ui.TextAreaBase(c.Key(fmt.Sprintf("editor-%d", n.id)), &n.text).Label("Markdown 编辑器").Fill().Padding(24).Font("monospace").FontSize(15).OnPaste(func(text string) bool { return a.paste(n, text) })
+	p := paper(c)
+	in := ui.TextAreaBase(c.Key(fmt.Sprintf("editor-%d", n.id)), &n.text).Label("Markdown 编辑器").Placeholder("从一句话开始…").Fill().Padding(26).Font("monospace").FontSize(14).LineHeight(1.7).TextColor(p.ink).OnPaste(func(text string) bool { return a.paste(n, text) })
 	if n.insert != "" {
 		start, end := in.TextSelection()
 		in.ReplaceText(start, end, n.insert)
@@ -275,13 +375,69 @@ func (a *app) editorView(c *ui.Context, n *note) {
 		n.jump = false
 	}
 }
+
+var lightMarkdown = &markdown.Theme{FontSize: 15, LineHeight: 1.75, BlockSpacing: 1.1, Link: ui.Hex("#728700"), QuoteBar: ui.Hex("#8ca500"), CodeBlockRadius: 8, CodeBlockBackground: ui.Hex("#f1f0e9")}
+var darkMarkdown = &markdown.Theme{FontSize: 15, LineHeight: 1.75, BlockSpacing: 1.1, Link: ui.Hex("#d7f64b"), QuoteBar: ui.Hex("#d7f64b"), CodeBlockRadius: 8, CodeBlockBackground: ui.Hex("#25271f")}
+
 func (a *app) previewView(c *ui.Context, n *note) {
+	if c.Theme().Dark {
+		n.md.Theme = darkMarkdown
+	} else {
+		n.md.Theme = lightMarkdown
+	}
 	ui.Scroll(c.Key(fmt.Sprintf("preview-%d", n.id))).Fill().Padding(28).TrackScroll(&n.scroll).Children(func() {
 		if n.text == "" {
-			ui.Text(c, "这里将显示 Markdown 预览").TextColor(c.Theme().TextMuted)
+			ui.Text(c, "这里将显示 Markdown 预览").TextColor(paper(c).muted)
 		} else {
 			markdown.View(c, n.text, n.md).FillWidth()
 		}
+	})
+}
+func (a *app) emptyView(c *ui.Context) {
+	p := paper(c)
+	ui.Scroll(c).Fill().Padding(48, 46).Children(func() {
+		ui.Column(c).MaxWidth(780).FillWidth().Gap(24).Children(func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() { statusDot(c, p.green); eyebrow(c, "YOUR NOTES, YOUR SPACE") })
+			ui.Column(c).Gap(8).Children(func() {
+				ui.Text(c, "留一点空间，").FontSize(44).FontWeight(800).LetterSpacing(-1.4)
+				ui.Text(c, "给新的想法。").FontSize(44).FontWeight(800).LetterSpacing(-1.4).TextColor(p.accent)
+			})
+			ui.Text(c, "一篇笔记、一段灵感，或是还没想好名字的计划。\n从这里开始，把思绪慢慢写清楚。").FontSize(14).LineHeight(1.8).TextColor(p.muted)
+			ui.Row(c).Gap(12).Padding(8, 0, 12, 0).Children(func() {
+				paperButton(c, "创建第一篇笔记", icons.plus, true).Height(40).Radius(20).OnClick(a.newNote)
+				paperButton(c, "打开已有笔记", icons.arrow, false).Height(40).Radius(20).OnClick(a.chooseFile)
+			})
+			ui.Box(c).Height(1).FillWidth().Background(p.line)
+			ui.Row(c).Gap(0).Children(func() {
+				a.welcomeCell(c, "01", "写下想法", "用 Markdown 保持简单，\n让表达成为唯一的重点。")
+				a.welcomeCell(c, "02", "放在一起", "添加多个文件夹，\n在熟悉的目录里整理笔记。")
+				a.welcomeCell(c, "03", "随时回望", "预览、搜索、图片附件，\n让每个想法都有迹可循。")
+			})
+			ui.Row(c).Padding(16, 0).Gap(22).Children(func() {
+				a.keyHint(c, "新建", "N")
+				a.keyHint(c, "保存", "S")
+				a.keyHint(c, "全局搜索", "⇧ F")
+			})
+		})
+	})
+}
+func (a *app) welcomeCell(c *ui.Context, num, title, detail string) {
+	p := paper(c)
+	ui.Column(c).Grow(1).Gap(12).Padding(10, 14, 10, 0).Children(func() {
+		eyebrow(c, num)
+		ui.Text(c, title).FontSize(17).FontWeight(700)
+		ui.Text(c, detail).FontSize(12).LineHeight(1.7).TextColor(p.muted)
+	})
+}
+func (a *app) keyHint(c *ui.Context, label, key string) {
+	p := paper(c)
+	mod := "Ctrl "
+	if runtime.GOOS == "darwin" {
+		mod = "⌘ "
+	}
+	ui.Row(c).Gap(7).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, label).FontSize(11).TextColor(p.muted)
+		ui.Text(c, mod+key).FontSize(10).Padding(3, 6).Radius(4).Border(1, p.line).TextColor(p.muted)
 	})
 }
 func (a *app) installMenu() {

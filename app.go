@@ -58,7 +58,7 @@ type app struct {
 }
 
 func newApp(config string) *app {
-	a := &app{config: config, sidebar: true, sidebarWidth: 270, splitPercent: 50, status: "本地 Markdown · Native UI"}
+	a := &app{config: config, sidebar: true, sidebarWidth: 270, splitPercent: 50, status: "随时写下新的想法"}
 	s, e := notebook.LoadSession(config)
 	if e != nil {
 		a.fail(e)
@@ -156,7 +156,7 @@ func (a *app) chooseFile() {
 }
 func (a *app) newNote() {
 	a.nextID++
-	n := &note{id: a.nextID, md: &markdown.Options{}}
+	n := &note{id: a.nextID, md: &markdown.Options{}, jump: true}
 	a.notes = append(a.notes, n)
 	a.active = n.id
 	a.mode = 0
@@ -179,7 +179,7 @@ func (a *app) openFile(path string) {
 		return
 	}
 	a.nextID++
-	n := &note{id: a.nextID, path: d.Path, text: d.Text, saved: d.Text, version: d.Version}
+	n := &note{id: a.nextID, path: d.Path, text: d.Text, saved: d.Text, version: d.Version, jump: true}
 	a.configurePreview(n)
 	a.notes = append(a.notes, n)
 	a.active = n.id
