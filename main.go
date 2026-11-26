@@ -21,6 +21,8 @@ func main() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{Title: "MyNotebook", Width: 1180, Height: 780, MinWidth: 760, MinHeight: 500, Content: ui.View(a.view)})
 		a.installMenu()
 		a.startUpdateChecks()
+		a.syncWatchers()
+		mygo.App.OnQuit(a.stopWatchers)
 		mygo.App.OnQuit(a.stopUpdates)
 		a.win.OnClose(func(e *mygo.CloseEvent) {
 			if a.hasChanges() {
@@ -29,6 +31,7 @@ func main() {
 				a.win.Invalidate()
 			} else {
 				a.persist()
+				a.stopWatchers()
 			}
 		})
 		mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {

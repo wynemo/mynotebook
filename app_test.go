@@ -237,3 +237,55 @@ func TestPaperSearchNavigationAndViewModes(t *testing.T) {
 		}
 	}
 }
+
+func TestTreeContextCreation(t *testing.T) {
+	a := testApp()
+	a.addRoot(t.TempDir())
+	root := a.roots[0]
+	tt := ui.NewTester(a.view, 1180, 780)
+	if err := tt.RightClick(root.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("新建文件夹"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.createOpen || !a.createDir {
+		t.Fatal("missing folder dialog")
+	}
+	a.createName = "子目录"
+	if err := tt.Click("创建"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.RightClick("子目录"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("新建文件"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	a.createName = "新笔记"
+	if err := tt.Click("创建"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root.Path, "子目录", "新笔记.md")
+	if a.current() == nil || a.current().path != path {
+		t.Fatal("new note not opened")
+	}
+	if !tt.HasText("新笔记.md") {
+		t.Fatal("tree not refreshed")
+	}
+	os.WriteFile(path, []byte("existing"), 0644)
+	a.beginCreate(filepath.Dir(path), false)
+	a.createName = "新笔记"
+	a.createEntry()
+	data, _ := os.ReadFile(path)
+	if !a.createOpen || a.createError == "" || string(data) != "existing" {
+		t.Fatal("duplicate must not overwrite")
+	}
+	a.createName = "../escape"
+	a.createEntry()
+	if !a.createOpen || a.createError == "" {
+		t.Fatal("invalid name accepted")
+	}
+}

@@ -21,6 +21,10 @@ type note struct {
 	insert                     string
 	start, end                 int
 	jump                       bool
+	external                   string
+	editStart, editEnd         int
+	editText                   string
+	editPending                bool
 	scroll                     ui.ScrollState
 	md                         *markdown.Options
 }
@@ -34,32 +38,47 @@ func (n *note) name() string {
 }
 
 type app struct {
-	preferences                notebook.Preferences
-	preferencesLoaded          bool
-	settingsOpen               bool
-	update                     updateState
-	stopUpdateChecks           context.CancelFunc
-	win                        *mygo.Window
-	config                     string
-	roots                      []*notebook.Node
-	notes                      []*note
-	active, nextID             int
-	sidebar                    bool
-	sidebarWidth, splitPercent float32
-	mode                       int
-	query                      string
-	results                    notebook.SearchResult
-	searching                  bool
-	searchID                   int
-	cancelSearch               context.CancelFunc
-	searchFocus                ui.Handle
-	searchOpen                 bool
-	busy                       bool
-	status                     string
-	errorText                  string
-	ask                        bool
-	pending                    *note
-	after                      func()
+	preferences                         notebook.Preferences
+	preferencesLoaded                   bool
+	settingsOpen                        bool
+	update                              updateState
+	stopUpdateChecks                    context.CancelFunc
+	win                                 *mygo.Window
+	config                              string
+	roots                               []*notebook.Node
+	notes                               []*note
+	active, nextID                      int
+	sidebar                             bool
+	sidebarWidth, splitPercent          float32
+	mode                                int
+	query                               string
+	results                             notebook.SearchResult
+	searching                           bool
+	searchID                            int
+	cancelSearch                        context.CancelFunc
+	searchFocus                         ui.Handle
+	searchOpen                          bool
+	busy                                bool
+	status                              string
+	closed                              []*note
+	watchers                            map[string]context.CancelFunc
+	renameOpen                          bool
+	renamePath, renameName, renameError string
+	renameFocus                         ui.Handle
+	findOpen                            bool
+	findText, replaceText               string
+	findFocus                           ui.Handle
+	linkOpen, imageLink                 bool
+	linkLabel, linkURL                  string
+	linkNote                            *note
+	createOpen, createDir               bool
+	createParent, createName            string
+	createError                         string
+	createFocus                         ui.Handle
+	errorText                           string
+	ask                                 bool
+	pending                             *note
+	after                               func()
 }
 
 func newApp(config string) *app {
@@ -127,6 +146,7 @@ func (a *app) addRoot(path string) {
 	a.roots = append(a.roots, n)
 	a.persist()
 	a.startSearch()
+	a.syncWatchers()
 }
 func (a *app) chooseFolders() {
 	if a.busy || a.win == nil {
@@ -195,6 +215,7 @@ func (a *app) openFile(path string) {
 	a.active = n.id
 	a.mode = a.preferences.DefaultMode
 	a.persist()
+	a.syncWatchers()
 }
 func (a *app) configurePreview(n *note) {
 	n.md = &markdown.Options{LoadImage: markdown.FileImages(filepath.Dir(n.path))}
@@ -240,6 +261,7 @@ func (a *app) save(n *note, done func()) {
 	}
 	n.version = v
 	n.saved = n.text
+	n.external = ""
 	a.status = "已保存 · " + n.name()
 	if done != nil {
 		done()
@@ -300,6 +322,7 @@ func (a *app) saveAs(n *note, done func()) {
 			a.status = "已保存 · " + n.name()
 			a.refresh()
 			a.persist()
+			a.syncWatchers()
 			if done != nil {
 				done()
 			}
@@ -320,6 +343,10 @@ func (a *app) refreshNode(n *notebook.Node) {
 		old[child.Path] = child
 	}
 	if e := notebook.Load(n); e != nil {
+		if os.IsNotExist(e) {
+			n.Children = nil
+			return
+		}
 		a.fail(e)
 		return
 	}
@@ -333,6 +360,11 @@ func (a *app) refreshNode(n *notebook.Node) {
 func (a *app) removeNote(n *note) {
 	for i, v := range a.notes {
 		if v == n {
+			copyNote := *n
+			a.closed = append(a.closed, &copyNote)
+			if len(a.closed) > 30 {
+				a.closed = a.closed[len(a.closed)-30:]
+			}
 			a.notes = append(a.notes[:i], a.notes[i+1:]...)
 			break
 		}
@@ -344,6 +376,7 @@ func (a *app) removeNote(n *note) {
 		}
 	}
 	a.persist()
+	a.syncWatchers()
 }
 func (a *app) guard(n *note, after func()) {
 	if n == nil || !n.dirty() {
@@ -378,6 +411,7 @@ func (a *app) requestQuit() {
 		a.cancelSearch()
 	}
 	if a.win != nil {
+		a.stopWatchers()
 		a.win.Destroy()
 		mygo.App.Quit()
 	}
@@ -453,4 +487,72 @@ func (a *app) jumpTo(m notebook.Match) {
 	n.start = start
 	n.end = start + utf8.RuneCountInString(lines[line])
 	n.jump = true
+}
+
+func (a *app) creationMenu(m *ui.Menu, parent string) {
+	if m.Item("新建文件").Chosen() {
+		a.beginCreate(parent, false)
+	}
+	if m.Item("新建文件夹").Chosen() {
+		a.beginCreate(parent, true)
+	}
+}
+func (a *app) beginCreate(parent string, dir bool) {
+	a.createParent, a.createDir = parent, dir
+	a.createName, a.createError = "", ""
+	a.createOpen = true
+	a.createFocus.Focus()
+}
+func (a *app) createEntry() {
+	name := strings.TrimSpace(a.createName)
+	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, ".") || strings.ContainsAny(name, "/\\") {
+		a.createError = "请输入有效名称，不能以点开头或包含路径分隔符"
+		return
+	}
+	if !a.createDir && !notebook.IsMarkdown(name) {
+		name += ".md"
+	}
+	path := filepath.Join(a.createParent, name)
+	var err error
+	if a.createDir {
+		err = os.Mkdir(path, 0755)
+	} else {
+		var f *os.File
+		f, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+		if err == nil {
+			err = f.Close()
+		}
+	}
+	if err != nil {
+		if os.IsExist(err) {
+			a.createError = "同名文件或文件夹已存在"
+		} else {
+			a.createError = err.Error()
+		}
+		return
+	}
+	a.createOpen = false
+	// Expand the destination, including a folder that has never been loaded.
+	var expand func(*notebook.Node)
+	expand = func(n *notebook.Node) {
+		if n.Path == a.createParent {
+			n.Open = true
+			a.fail(notebook.Load(n))
+			return
+		}
+		for _, child := range n.Children {
+			if child.Dir {
+				expand(child)
+			}
+		}
+	}
+	for _, r := range a.roots {
+		expand(r)
+	}
+	a.refresh()
+	a.startSearch()
+	a.status = "已创建 · " + name
+	if !a.createDir {
+		a.openFile(path)
+	}
 }

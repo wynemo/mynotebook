@@ -38,6 +38,18 @@ func (a *app) view(c *ui.Context) {
 	if c.Shortcut(mod|ui.Shift, ui.KeyF) {
 		a.openSearch()
 	}
+	if c.Shortcut(mod, ui.KeyF) {
+		a.openFind()
+	}
+	if c.Shortcut(mod, ui.KeyH) {
+		a.openFind()
+	}
+	if c.Shortcut(mod|ui.Shift, ui.KeyT) {
+		a.reopenNote()
+	}
+	if c.Shortcut(mod, ui.KeyK) {
+		a.beginLink(false)
+	}
 	ui.Column(c).Fill().Background(p.canvas).Children(func() {
 		a.topbar(c)
 		if a.settingsOpen {
@@ -68,6 +80,8 @@ func (a *app) view(c *ui.Context) {
 			a.save(n, fn)
 		}
 	}
+	a.createDialog(c)
+	a.operationDialogs(c)
 	if a.errorText != "" {
 		show := true
 		if ui.AlertDialog(c, &show, "操作未完成", a.errorText, "知道了") >= 0 || !show {
@@ -131,7 +145,15 @@ func (a *app) sidebarView(c *ui.Context) {
 			ui.Box(c).Grow(1)
 			iconButton(c, "刷新", icons.refresh).OnClick(a.refresh)
 		})
-		ui.Scroll(c).Grow(1).FillWidth().Gap(18).Children(func() {
+		ui.Scroll(c).Grow(1).FillWidth().Gap(18).ContextMenu(func(m *ui.Menu) {
+			if len(a.roots) == 1 {
+				a.creationMenu(m, a.roots[0].Path)
+			} else {
+				for _, r := range a.roots {
+					m.Submenu(r.Name, func(sub *ui.Menu) { a.creationMenu(sub, r.Path) })
+				}
+			}
+		}).Children(func() {
 			if len(a.roots) == 0 {
 				ui.Column(c).Padding(12, 6).Gap(10).Children(func() {
 					ui.Text(c, "让想法各就各位。").FontWeight(650)
@@ -150,6 +172,7 @@ func (a *app) sidebarView(c *ui.Context) {
 							ui.Text(c, r.Name).FontSize(12).FontWeight(700).SingleLine()
 						})
 						b.OnClick(func() { r.Open = !r.Open })
+						a.fileRow(c, b, r)
 						iconButton(c, "移除文件夹 "+r.Name, icons.close).OnClick(func() { a.removeRoot(r) })
 					})
 					if r.Open {
@@ -180,6 +203,7 @@ func (a *app) removeRoot(r *notebook.Node) {
 	}
 	a.persist()
 	a.startSearch()
+	a.syncWatchers()
 }
 func (a *app) navItem(c *ui.Context, label string, icon *ui.SVG, selected bool, action func()) {
 	p := paper(c)
@@ -244,7 +268,7 @@ func (a *app) searchView(c *ui.Context) {
 }
 func (a *app) treeNode(c *ui.Context, n *notebook.Node) {
 	if n.Dir {
-		ui.TreeItem(c.Key(n.Path), n.Name, &n.Open, func() {
+		row := ui.TreeItem(c.Key(n.Path), n.Name, &n.Open, func() {
 			if !n.Loaded {
 				a.fail(notebook.Load(n))
 			}
@@ -252,12 +276,14 @@ func (a *app) treeNode(c *ui.Context, n *notebook.Node) {
 				a.treeNode(c, child)
 			}
 		})
+		a.fileRow(c, row, n)
 	} else {
 		selected := false
 		if cur := a.current(); cur != nil {
 			selected = cur.path == n.Path
 		}
-		ui.TreeItem(c.Key(n.Path), n.Name, nil, nil).Selected(selected).OnClick(func() { a.openFile(n.Path) })
+		row := ui.TreeItem(c.Key(n.Path), n.Name, nil, nil).Selected(selected).OnClick(func() { a.openFile(n.Path) })
+		a.fileRow(c, row, n)
 	}
 }
 func (a *app) documentView(c *ui.Context) {
@@ -283,7 +309,7 @@ func (a *app) documentView(c *ui.Context) {
 							if n.dirty() {
 								statusDot(c, p.accent)
 							}
-						}).OnClick(func() { a.active = n.id; a.persist() })
+						}).OnClick(func() { a.active = n.id; a.persist() }).ContextMenu(func(m *ui.Menu) { a.tabMenu(m, n) })
 						iconButton(c, fmt.Sprintf("关闭标签 %d", n.id), icons.close).Size(22, 26).OnClick(func() { a.guard(n, func() { a.removeNote(n) }) })
 					})
 				}
@@ -292,6 +318,13 @@ func (a *app) documentView(c *ui.Context) {
 		n := a.current()
 		if n == nil {
 			return
+		}
+		if n.external != "" {
+			ui.Row(c).Padding(8, 28).Gap(12).Children(func() {
+				ui.Text(c, n.external).Grow(1).FontSize(12)
+				ui.Button(c, "另存为…").OnClick(func() { a.saveAs(n, nil) })
+				ui.Button(c, "重新载入").OnClick(func() { a.reload(n) })
+			})
 		}
 		ui.Row(c).Padding(22, 28).Gap(16).AlignItems(ui.Center).Children(func() {
 			ui.Column(c).Grow(1).Gap(7).Children(func() {
@@ -331,6 +364,10 @@ func (a *app) documentView(c *ui.Context) {
 						b.Children(func() { ui.Icon(c, icon).Size(13, 13); ui.Text(c, label).FontSize(11).FontWeight(600) }).OnClick(func() { a.mode = i })
 					}
 				})
+				a.editToolbar(c)
+				if a.findOpen {
+					a.findBar(c, n)
+				}
 				switch a.mode {
 				case 0:
 					a.editorView(c, n)
@@ -361,6 +398,7 @@ func (a *app) reload(n *note) {
 			a.fail(e)
 			return
 		}
+		n.external = ""
 		n.text = d.Text
 		n.saved = d.Text
 		n.version = d.Version
@@ -376,6 +414,10 @@ func (a *app) editorView(c *ui.Context, n *note) {
 	if !a.preferences.Wrap {
 		in.NoWrap()
 	}
+	if n.editPending {
+		in.ReplaceText(n.editStart, n.editEnd, n.editText)
+		n.editPending = false
+	}
 	if n.insert != "" {
 		start, end := in.TextSelection()
 		in.ReplaceText(start, end, n.insert)
@@ -386,6 +428,7 @@ func (a *app) editorView(c *ui.Context, n *note) {
 		in.Focus()
 		n.jump = false
 	}
+	n.start, n.end = in.TextSelection()
 }
 
 var lightMarkdown = &markdown.Theme{FontSize: 15, LineHeight: 1.75, BlockSpacing: 1.1, Link: ui.Hex("#728700"), QuoteBar: ui.Hex("#8ca500"), CodeBlockRadius: 8, CodeBlockBackground: ui.Hex("#f1f0e9")}
@@ -455,7 +498,7 @@ func (a *app) keyHint(c *ui.Context, label, key string) {
 func (a *app) installMenu() {
 	action := func(fn func()) func(*mygo.MenuItem, *mygo.Window) {
 		return func(*mygo.MenuItem, *mygo.Window) {
-			if a.ask || a.busy || a.errorText != "" {
+			if a.ask || a.busy || a.createOpen || a.renameOpen || a.linkOpen || a.errorText != "" {
 				return
 			}
 			fn()
@@ -471,13 +514,21 @@ func (a *app) installMenu() {
 			mygo.Separator(),
 			{Label: "保存", Accelerator: "CmdOrCtrl+S", Click: action(func() { a.save(a.current(), nil) })},
 			{Label: "另存为…", Accelerator: "CmdOrCtrl+Shift+S", Click: action(func() { a.saveAs(a.current(), nil) })},
+			{Label: "重新打开关闭的笔记", Accelerator: "CmdOrCtrl+Shift+T", Click: action(a.reopenNote)},
 			{Label: "关闭笔记", Accelerator: "CmdOrCtrl+W", Click: action(func() {
 				if n := a.current(); n != nil {
 					a.guard(n, func() { a.removeNote(n) })
 				}
 			})},
 		}},
-		{Role: mygo.RoleEditMenu},
+		{Label: "编辑", Submenu: []*mygo.MenuItem{
+			{Role: mygo.RoleUndo}, {Role: mygo.RoleRedo}, mygo.Separator(),
+			{Role: mygo.RoleCut}, {Role: mygo.RoleCopy}, {Role: mygo.RolePaste}, {Role: mygo.RoleSelectAll},
+			mygo.Separator(),
+			{Label: "文内查找 / 替换", Accelerator: "CmdOrCtrl+F", Click: action(a.openFind)},
+			{Label: "插入链接", Accelerator: "CmdOrCtrl+K", Click: action(func() { a.beginLink(false) })},
+			{Label: "插入图片", Click: action(func() { a.beginLink(true) })},
+		}},
 		{Label: "视图", Submenu: []*mygo.MenuItem{
 			{Label: "设置…", Accelerator: "CmdOrCtrl+,", Click: action(func() { a.settingsOpen = !a.settingsOpen })},
 			{Label: "检查更新…", Click: action(func() { a.settingsOpen = true; a.checkUpdates(false) })},
@@ -489,4 +540,32 @@ func (a *app) installMenu() {
 		}},
 		{Role: mygo.RoleWindowMenu},
 	}))
+}
+
+func (a *app) createDialog(c *ui.Context) {
+	if !a.createOpen {
+		return
+	}
+	p := paper(c)
+	ui.DialogBase(c, &a.createOpen, func(backdrop, panel ui.Element) {
+		backdrop.Background(ui.RGBA(0, 0, 0, 0.35))
+		panel.Width(420).Padding(24).Radius(16).Background(p.canvas).Children(func() {
+			ui.Column(c).Gap(14).Children(func() {
+				title := "新建文件"
+				if a.createDir {
+					title = "新建文件夹"
+				}
+				ui.Text(c, title).FontSize(18).FontWeight(700)
+				ui.Text(c, a.createParent).FontSize(12).TextColor(p.muted)
+				ui.TextInput(c, &a.createName).Label("名称").Bind(&a.createFocus).FillWidth().OnSubmit(a.createEntry)
+				if a.createError != "" {
+					ui.Text(c, a.createError).FontSize(12)
+				}
+				ui.Row(c).Gap(10).Children(func() {
+					paperButton(c, "取消", icons.close, false).OnClick(func() { a.createOpen = false })
+					paperButton(c, "创建", icons.plus, true).OnClick(a.createEntry)
+				})
+			})
+		})
+	})
 }
