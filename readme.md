@@ -1,5 +1,7 @@
 # MyNotebook
 
+<img src="resources/icon.png" alt="MyNotebook 笔记本图标" width="128" />
+
 用 [egoist/mygo](https://github.com/egoist/mygo) Native UI 编写的轻量 Markdown 桌面软件，支持 macOS / Windows / Linux。界面由 Go 原生组件绘制，不使用 HTML、JavaScript 或 WebView。
 
 ## 功能
@@ -43,6 +45,8 @@ go tool mygo build -platform darwin/universal
 ```
 
 输出在 `build/`。macOS 输出 `.app` 和 `.dmg`；Windows 输出 `.exe`，安装 NSIS（`makensis`）后还可生成安装程序。发布给其他用户前需自行配置代码签名与 macOS 公证。Windows 版本使用 Native UI，不依赖 WebView2。
+
+应用图标位于 `resources/icon.png`，由 `mygo.json` 的 `icon` 字段指定。MyGo 构建时会自动生成 macOS、Windows 和 Linux 所需的图标尺寸与格式。
 
 ## GitHub Actions 与版本发布
 

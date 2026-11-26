@@ -1,5 +1,10 @@
 # 更新日志
 
+## 0.1.1
+
+- 新增深青色笔记本应用图标，搭配暖白纸页和橙色书签。
+- 将图标接入跨平台打包配置，并在 README 中添加预览。
+
 ## 0.1.0
 
 - MyGo Native UI Markdown 笔记本，支持 macOS、Windows 和 Linux。
